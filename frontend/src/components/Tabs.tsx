@@ -1,0 +1,2 @@
+export type Tab = { id: string; label: string }
+export function Tabs({ activeId, onChange, tabs }: { activeId: string; onChange: (id: string) => void; tabs: Tab[] }) { return <div aria-label="Tabs" className="tp-tabs" role="tablist">{tabs.map((tab) => <button aria-selected={activeId === tab.id} className={`tp-tab ${activeId === tab.id ? 'is-active' : ''}`} key={tab.id} onClick={() => onChange(tab.id)} role="tab" type="button">{tab.label}</button>)}</div> }

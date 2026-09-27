@@ -1,0 +1,161 @@
+===== 20260906000000_destination_inventory =====
+-- OpenStreetMap discoveries are planning recommendations, not bookable vendor offers.
+ALTER TABLE "InventoryItem" ADD COLUMN "source" TEXT NOT NULL DEFAULT 'seed';
+ALTER TABLE "InventoryItem" ADD COLUMN "bookable" BOOLEAN NOT NULL DEFAULT true;
+
+===== 20260906120000_add_tour_group =====
+-- CreateTable
+CREATE TABLE "TourGroup" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "tripId" TEXT NOT NULL,
+    "operatorId" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "TourGroup_tripId_fkey" FOREIGN KEY ("tripId") REFERENCES "Trip" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "TourGroup_operatorId_fkey" FOREIGN KEY ("operatorId") REFERENCES "User" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "GroupParticipant" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "tourGroupId" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'INVITED',
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "GroupParticipant_tourGroupId_fkey" FOREIGN KEY ("tourGroupId") REFERENCES "TourGroup" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "GroupParticipant_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
+);
+
+-- CreateIndex
+CREATE UNIQUE INDEX "GroupParticipant_tourGroupId_userId_key" ON "GroupParticipant"("tourGroupId", "userId");
+
+===== 20260906130000_add_coordinator =====
+-- AlterTable
+-- Role is stored as plain TEXT in SQLite (see "User"."role" in the init migration), so adding the
+-- COORDINATOR enum value needs no DDL here - it's enforced at the Prisma Client / application layer.
+
+-- AlterTable
+ALTER TABLE "Trip" ADD COLUMN "coordinatorId" TEXT REFERENCES "User" ("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AlterTable
+ALTER TABLE "TourGroup" ADD COLUMN "coordinatorId" TEXT REFERENCES "User" ("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+===== 20260906150000_add_notifications =====
+CREATE TABLE "Notification" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "userId" TEXT NOT NULL,
+    "type" TEXT NOT NULL,
+    "title" TEXT NOT NULL,
+    "message" TEXT NOT NULL,
+    "tripId" TEXT,
+    "readAt" DATETIME,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "Notification_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+CREATE INDEX "Notification_userId_readAt_createdAt_idx" ON "Notification"("userId", "readAt", "createdAt");
+
+===== 20260906160000_add_fx_rate_cache =====
+CREATE TABLE "FxRate" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "baseCurrency" TEXT NOT NULL,
+    "quoteCurrency" TEXT NOT NULL,
+    "rate" REAL NOT NULL,
+    "asOf" DATETIME NOT NULL,
+    "fetchedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX "FxRate_baseCurrency_quoteCurrency_asOf_key" ON "FxRate"("baseCurrency", "quoteCurrency", "asOf");
+
+===== 20260906170000_add_budget_category_weights =====
+-- AlterTable
+-- Backs the constraint-based budget allocator: per-trip weights across flights/hotel/activities/food
+-- that the allocator normalizes and multiplies against the trip budget. Null means "use the
+-- allocator's default weights" so existing trips keep working with no backfill required.
+ALTER TABLE "Trip" ADD COLUMN "categoryWeights" JSONB;
+
+===== 20260907180000_add_group_collaboration =====
+-- Batch 2: traveler-facing group collaboration, activity voting, and weighted splits
+ALTER TABLE "GroupParticipant" ADD COLUMN "shareWeight" REAL;
+
+CREATE TABLE "ActivityVote" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "tripId" TEXT NOT NULL,
+  "itineraryItemId" TEXT,
+  "candidateInventoryId" TEXT,
+  "userId" TEXT NOT NULL,
+  "vote" TEXT NOT NULL CHECK ("vote" IN ('YES', 'NO')),
+  "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT "ActivityVote_tripId_fkey" FOREIGN KEY ("tripId") REFERENCES "Trip" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT "ActivityVote_itineraryItemId_fkey" FOREIGN KEY ("itineraryItemId") REFERENCES "ItineraryItem" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT "ActivityVote_candidateInventoryId_fkey" FOREIGN KEY ("candidateInventoryId") REFERENCES "InventoryItem" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT "ActivityVote_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+CREATE INDEX "ActivityVote_tripId_itineraryItemId_candidateInventoryId_idx" ON "ActivityVote"("tripId", "itineraryItemId", "candidateInventoryId");
+CREATE INDEX "ActivityVote_userId_itineraryItemId_candidateInventoryId_idx" ON "ActivityVote"("userId", "itineraryItemId", "candidateInventoryId");
+
+===== 20260907190000_add_sos_alerts =====
+CREATE TABLE "SosAlert" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "tripId" TEXT NOT NULL,
+  "userId" TEXT NOT NULL,
+  "itineraryItemId" TEXT,
+  "lat" REAL,
+  "lng" REAL,
+  "message" TEXT,
+  "status" TEXT NOT NULL DEFAULT 'OPEN',
+  "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "resolvedAt" DATETIME,
+  CONSTRAINT "SosAlert_tripId_fkey" FOREIGN KEY ("tripId") REFERENCES "Trip" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT "SosAlert_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT "SosAlert_itineraryItemId_fkey" FOREIGN KEY ("itineraryItemId") REFERENCES "ItineraryItem" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+);
+CREATE INDEX "SosAlert_tripId_status_createdAt_idx" ON "SosAlert"("tripId", "status", "createdAt");
+
+===== 20260907200000_add_vendor_marketplace =====
+-- Batch 4: vendor marketplace / bidding
+CREATE TABLE "OpenSlotRequest" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "operatorId" TEXT NOT NULL,
+  "tripId" TEXT,
+  "destination" TEXT NOT NULL,
+  "category" TEXT NOT NULL CHECK ("category" IN ('FLIGHT','HOTEL','ACTIVITY','TRANSFER')),
+  "dateNeeded" DATETIME NOT NULL,
+  "budgetCap" REAL NOT NULL,
+  "status" TEXT NOT NULL DEFAULT 'OPEN' CHECK ("status" IN ('OPEN','AWARDED','CLOSED')),
+  "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT "OpenSlotRequest_operatorId_fkey" FOREIGN KEY ("operatorId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT "OpenSlotRequest_tripId_fkey" FOREIGN KEY ("tripId") REFERENCES "Trip" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+);
+CREATE INDEX "OpenSlotRequest_operatorId_status_createdAt_idx" ON "OpenSlotRequest"("operatorId","status","createdAt");
+CREATE INDEX "OpenSlotRequest_category_status_dateNeeded_idx" ON "OpenSlotRequest"("category","status","dateNeeded");
+
+CREATE TABLE "VendorBid" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "slotRequestId" TEXT NOT NULL,
+  "vendorId" TEXT NOT NULL,
+  "price" REAL NOT NULL,
+  "notes" TEXT,
+  "status" TEXT NOT NULL DEFAULT 'PENDING' CHECK ("status" IN ('PENDING','ACCEPTED','REJECTED')),
+  "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT "VendorBid_slotRequestId_fkey" FOREIGN KEY ("slotRequestId") REFERENCES "OpenSlotRequest" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT "VendorBid_vendorId_fkey" FOREIGN KEY ("vendorId") REFERENCES "Vendor" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+CREATE INDEX "VendorBid_slotRequestId_status_createdAt_idx" ON "VendorBid"("slotRequestId","status","createdAt");
+CREATE INDEX "VendorBid_vendorId_status_createdAt_idx" ON "VendorBid"("vendorId","status","createdAt");
+
+===== 20260907210000_add_trip_checklist =====
+CREATE TABLE "TripChecklistItem" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "tripId" TEXT NOT NULL,
+  "category" TEXT NOT NULL,
+  "label" TEXT NOT NULL,
+  "isDone" BOOLEAN NOT NULL DEFAULT false,
+  "source" TEXT NOT NULL DEFAULT 'AUTO',
+  "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT "TripChecklistItem_tripId_fkey" FOREIGN KEY ("tripId") REFERENCES "Trip" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+CREATE INDEX "TripChecklistItem_tripId_category_createdAt_idx" ON "TripChecklistItem"("tripId", "category", "createdAt");
+

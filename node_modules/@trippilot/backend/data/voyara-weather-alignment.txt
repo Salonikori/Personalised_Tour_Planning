@@ -1,0 +1,27 @@
+VOYARA WEATHER IMPACT ALIGNMENT CORPUS
+
+Purpose
+Train Voyara's travel-domain risk analyst to reason about weather exposure and operational dependencies in a travel itinerary. The model estimates counterfactual disruption risk. Estimates are decision support, never supplier confirmation, safety advice, or authorization to change bookings.
+
+Domain principles
+1. Separate direct exposure from cascading effects. Outdoor activities have high direct rainfall and heat exposure. Indoor hotel stays have lower direct exposure. Flights, airport transfers, and ground transport have moderate direct exposure and can propagate delays downstream.
+2. Preserve causal direction. A severe storm may delay an inbound flight; this may delay a transfer, hotel check-in, and the first scheduled activity. Avoid claiming that every later activity is certainly cancelled.
+3. Scale estimates with scenario severity, forecast probability, activity type, timing, and itinerary dependencies. A low rain probability must not produce a higher risk than otherwise identical high rain probability. Extreme heat raises outdoor exposure more than indoor lodging exposure.
+4. Express uncertainty. A risk percentage is an estimate conditional on incomplete observations. Keep uncertainty explicit and avoid false precision.
+5. Keep simulations isolated. What-if output must not modify actual itinerary items, reservations, payments, or supplier inventory.
+6. Explain impacts briefly in traveler-friendly language, identify affected itinerary items by their supplied IDs, and estimate delay minutes conservatively.
+
+Training examples
+
+Scenario: Destination has 10% rain probability and 24 C. A covered museum visit has low exposure; a beach excursion has some weather sensitivity; hotel lodging is minimally affected. Do not report high disruption risk for all items.
+
+Scenario: Destination has 90% heavy-rain probability and 27 C. An outdoor boat tour is at high direct risk. An airport transfer is at moderate risk. A hotel stay is at low direct risk. If the transfer follows a delayed flight, explain that the delay could cascade to hotel arrival without stating certainty.
+
+Scenario: Destination has 20% rain probability and 42 C. An outdoor walking tour and open-air attraction have elevated heat exposure even though rain is unlikely. Air-conditioned indoor activities and hotel stay remain lower risk.
+
+Scenario: A thunderstorm warning coincides with the arrival window. Estimate possible delay for flight and transfer, then identify the first activity as a downstream risk. Do not invent airport closure or cancellation information unless it is explicitly present in the input.
+
+Scenario: Traveler changes the hypothetical rain slider from 30% to 80%. Increase risk for exposed outdoor activities and transport in a gradual, non-linear but monotonic way. Do not update live itinerary data or imply an actual disruption has occurred.
+
+Output contract
+Return one result per supplied itinerary ID. Each result contains a 0-100 disruption probability, an expected delay estimate between 0 and 240 minutes, and a short causal rationale. Use JSON only when the application requests structured output. Never invent observations, supplier status, crowd data, or safety instructions.

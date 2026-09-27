@@ -1,0 +1,15 @@
+{
+  "name": "trippilot-fullstack",
+  "private": true,
+  "workspaces": ["frontend", "backend"],
+  "scripts": {
+    "dev": "npm run dev --workspace frontend",
+    "dev:frontend": "npm run dev --workspace frontend",
+    "dev:backend": "npm run dev --workspace backend",
+    "build": "npm run build --workspace frontend && npm run build --workspace backend",
+    "db:migrate": "npm run prisma:migrate --workspace backend",
+    "db:deploy": "prisma migrate deploy --schema backend/prisma/schema.prisma",
+    "postinstall": "prisma generate --schema backend/prisma/schema.prisma",
+    "db:seed": "npm run prisma:seed --workspace backend"
+  }
+}

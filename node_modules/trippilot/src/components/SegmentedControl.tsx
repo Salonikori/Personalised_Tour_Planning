@@ -1,0 +1,2 @@
+export type Segment = { id: string; label: string }
+export function SegmentedControl({ onChange, options, value }: { onChange: (id: string) => void; options: Segment[]; value: string }) { return <div className="tp-segmented" role="group">{options.map((option) => <button className={option.id === value ? 'is-active' : ''} key={option.id} onClick={() => onChange(option.id)} type="button">{option.label}</button>)}</div> }
